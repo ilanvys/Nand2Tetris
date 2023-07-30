@@ -1,0 +1,90 @@
+// This file is part of nand2tetris, as taught in The Hebrew University,
+// and was written by Aviv Yaish, and is published under the Creative 
+// Common Attribution-NonCommercial-ShareAlike 3.0 Unported License 
+// https://creativecommons.org/licenses/by-nc-sa/3.0/
+
+// This chip is an extension of the regular CPU that uses the extended ALU.
+// If instruction[15]==0 or (instruction[14]==1 and instruction[13]==1),
+// the CpuMul behaves exactly the same as the regular CPU.
+// If instruction[15]==1 and instruction[14]==0 the chip will behave as follows:
+//  Instruction  | 12 | 11 | 10 |
+// ______________________________
+// dest=D<<;jump | 0  | 1  | 1  |
+// dest=A<<;jump | 0  | 1  | 0  |
+// dest=M<<;jump | 1  | 1  | 0  |
+// dest=D>>;jump | 0  | 0  | 1  |
+// dest=A>>;jump | 0  | 0  | 0  |
+// dest=M>>;jump | 1  | 0  | 0  |
+
+CHIP CpuMul {
+    IN  inM[16],         // M value input  (M = contents of RAM[A])
+        instruction[16], // Instruction for execution
+        reset;           // Signals whether to re-start the current
+                         // program (reset=1) or continue executing
+                         // the current program (reset=0).
+    OUT outM[16],        // M value output
+        writeM,          // Write into M? 
+        addressM[15],    // Address in data memory (of M)
+        pc[15];          // address of next instruction
+    
+    PARTS:
+    // define variable name
+    And(a=instruction[15], b=true, out=instType);
+
+    // Select A input and load bit
+    Not(in=instType, out=notInst);
+    Mux16(a=outALU, b=instruction, sel=notInst, out=inA);
+    Or(a=notInst, b=instruction[5], out=loadA);
+    ARegister(in=inA, load=loadA, out=outA, out[0..14]=addressM);
+
+    // Select D load bit
+    And(a=instType, b=instruction[4], out=loadD);
+    DRegister(in=outALU, load=loadD, out=outD);
+
+    // Select output of A or inM to be inserted to the ALU
+    And(a=instType, b=instruction[12], out=selectAM);
+    Mux16(a=outA, b=inM, sel=selectAM, out=outAM);
+
+    ExtendAlu(x=outD, y=outAM, instruction[8]=instruction[14],
+    instruction[7]=instruction[15],
+    instruction[0..6]=instruction[6..12], out=outALU, out=outM, zr=zr, ng=ng);
+    And(a=instType, b=instruction[3], out=writeM);
+
+    //JGT
+    Or(a=ng, b=zr, out=orjgt);
+    Not(in=orjgt, out=notjgt);
+    And(a=notjgt, b=instruction[0], out=outjgt);
+
+    //JEQ
+    And(a=zr, b=instruction[1], out=outjeq);
+
+    //JGE
+    Or(a=outjgt, b=outjeq, out=outjge);
+
+    //JLT
+    And(a=ng, b=instruction[2], out=outjlt);
+
+    //JNE
+    Or(a=outjgt, b=outjlt, out=outjne);
+
+    //JLE
+    Or(a=outjlt, b=outjeq, out=outjle);
+
+    //JMP
+    And(a=instruction[0], b=instruction[1], out=andjmp);
+    And(a=andjmp, b=instruction[2], out=outjmp);
+
+    //check jump
+    Or(a=outjge, b=outjlt, out= orload1);
+    Or(a=orload1, b=outjne, out= orload2);
+    Or(a=orload2, b=outjle, out= orload3);
+    Or(a=orload2, b=outjmp, out= orload4);
+    And(a=instruction[15], b=orload4, out=tojmp);
+
+    //check inc
+    Or(a=tojmp, b=reset, out=toinc);
+    Not(in=toinc, out=pcinc);
+
+    //pc-output
+    PC(in=outA ,load=tojmp ,inc=pcinc ,reset=reset ,out[0..14]=pc);
+}
